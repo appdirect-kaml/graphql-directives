@@ -1,1 +1,1 @@
-# graphql-directives
+# Graphql Directives
