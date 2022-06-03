@@ -12,7 +12,7 @@ const typeDefs = gql`
   directive @auth(role: String!) on FIELD_DEFINITION
   directive @length(min: Int, max: Int) on FIELD_DEFINITION
   directive @uuid(field: String!) on OBJECT
-  directive @date(format: String = "mm/dd/yyyy") on FIELD_DEFINITION
+  directive @date(format: String = "mm/dd/yyyy") on FIELD_DEFINITION # Set a default format if not provided
 
   type Post @uuid(field: "uuid") {
     id: Int!
