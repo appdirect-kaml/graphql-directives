@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { ApolloServer, gql, ApolloError } from 'apollo-server';
 import { makeExecutableSchema } from '@graphql-tools/schema';
 import { mapSchema, getDirective, MapperKind } from '@graphql-tools/utils';
-import { defaultFieldResolver, GraphQLObjectType } from 'graphql';
+import { defaultFieldResolver, GraphQLObjectType, GraphQLNonNull, GraphQLInt, GraphQLString } from 'graphql';
 
 const typeDefs = gql`
   directive @uuid(field: String!) on OBJECT
@@ -13,24 +13,46 @@ const typeDefs = gql`
   directive @rest2(url: String!) on FIELD_DEFINITION
   directive @auth(role: String!) on FIELD_DEFINITION
   directive @length(min: Int, max: Int) on FIELD_DEFINITION
-  directive @date(format: String = "mm/dd/yyyy") on FIELD_DEFINITION # Set a default format if not provided
+  # Set a default format if not provided
+  directive @date(format: String = "mm/dd/yyyy") on FIELD_DEFINITION
   
+  type Query {
+    post: Post 
+    @auth(role: "ADMIN") 
+    # @rest2(url: "https://jsonplaceholder.typicode.com/posts/2")
+    @rest(url: "https://jsonplaceholder.typicode.com/posts/1")
+  }
+
   type Post @uuid(field: "uuid") {
     id: Int!
     # uuid: ID!
     userId: Int!
-    title: String! @upper @rest(url: "https://jsonplaceholder.typicode.com/users/10")
+    title: String! @upper # @rest(url: "https://jsonplaceholder.typicode.com/users/10")
     body: String! @length(min: 10)
-    # createdAt: String! @date(format: "dddd, mmmm d, yyyy")
+    # modifiedAt: String! @date(format: "dddd, mmmm d, yyyy")
     createdAt: String! @date(format: "isoDateTime")
     uuid: ID!
   }
 
-  type Query {
-    post: Post 
-    @auth(role: "ADMIN") 
-    @rest2(url: "https://jsonplaceholder.typicode.com/posts/2")
-    @rest(url: "https://jsonplaceholder.typicode.com/posts/1")
+  # For injecting a new field into an object inside the input object
+  directive @addField(name: String!, value: Int!) on FIELD_DEFINITION
+
+  type Mutation {
+    updateUser(input: UpdateUserInput!): User! @addField(name: "age", value: 101)
+  }
+
+  input UpdateUserInput {
+    id: ID!
+    name: String!
+    email: String!
+  }
+
+  type User {
+    id: ID!
+    name: String!
+    email: String!
+    age: Int
+    createdAt: String! @date(format: "isoDateTime")
   }
 `;
 
@@ -41,14 +63,22 @@ const resolvers = {
       console.log(`🔴 args.post:${JSON.stringify(args.post)} \n---`);
       return args.post; // Injected into `args` by the `@rest` directive
     }
-  }
+  },
+  Mutation: {
+    updateUser: (_, { input }, { dataSources }) => {
+      console.log((`🟥 in resolving mutation user`));
+      console.log(`🟥 input: ${JSON.stringify(input)}`);
+
+      input.age += 1;
+      return input;
+    },
+  },
 };
 
 let schema = makeExecutableSchema({
   typeDefs,
   resolvers
 });
-
 
 // Transform the schema by applying directive logic
 
@@ -63,6 +93,9 @@ schema = lengthDirectiveTransformer(schema, 'length');
 schema = uuidDirectiveTransformer(schema, 'uuid');
 schema = dateDirectiveTransformer(schema, 'date');
 
+schema = addFieldDirectiveTransformer(schema, 'addField');
+
+// Start the server
 const server = new ApolloServer({ schema });
 
 server.listen().then(({ url }) => {
@@ -228,4 +261,32 @@ function lengthDirectiveTransformer(schema, directiveName) {
       }
     }
   });
+}
+
+// 7 - addField
+function addFieldDirectiveTransformer(schema, directiveName) {
+  return mapSchema(schema, {
+    [MapperKind.OBJECT_FIELD]: (fieldConfig) => {
+      const myDirective = getDirective(schema, fieldConfig, directiveName)?.[0];
+
+      if (myDirective) {
+        const { name, value } = myDirective;
+        const { resolve = defaultFieldResolver } = fieldConfig;
+
+        fieldConfig.resolve = async function (parent, input, context, ...rest) {
+          console.log(`🟧 7. in ADD_FIELD`);
+          console.log(`🟧 input:${JSON.stringify(input)}`);
+
+          // injecting
+          input.input[name] = value;
+
+          const result = await resolve(parent, input, context, ...rest); // Calling the original resolver
+          return result;
+        };
+      }
+
+      return fieldConfig;
+    }
+  });
+
 }
